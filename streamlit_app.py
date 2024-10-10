@@ -81,7 +81,7 @@ def limpar_dados(dados_fundos_total):
     })
 
     # Excluir colunas específicas
-    colunas_para_excluir = ['Denominação Social','Quantidade Venda Negociada', 'Quantidade Aquisição Negociada',
+    colunas_para_excluir = ['DENOM_SOCIAL','Quantidade Venda Negociada', 'Quantidade Aquisição Negociada',
                             'Quantidade Posição Final', 'Quantidade Ativo Exterior', 'Emissor Ligado',
                             'Tipo Negociação', 'Valor Aquisição Negociada', 'Valor Venda Negociada',
                             'Data Confidencial Aplicação', 'Risco Emissor', 'Código Selic',
