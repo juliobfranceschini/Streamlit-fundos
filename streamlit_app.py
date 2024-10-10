@@ -1,151 +1,176 @@
+%%writefile app.py
 import streamlit as st
 import pandas as pd
-import math
-from pathlib import Path
+import zipfile
+import io
+import requests
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
-)
+# Função para carregar e concatenar os dados a partir de vários arquivos ZIP
+def carregar_dados_cvm(ano, mes):
+    url = f'https://dados.cvm.gov.br/dados/FI/DOC/CDA/DADOS/cda_fi_{ano}{mes}.zip'
+    response = requests.get(url)
+    dataframes = []
+    with zipfile.ZipFile(io.BytesIO(response.content), 'r') as arquivo_zip:
+        for file_name in arquivo_zip.namelist():
+            df = pd.read_csv(arquivo_zip.open(file_name), sep=';', encoding='ISO-8859-1')
+            dataframes.append(df)
+    dados_fundos_total = pd.concat(dataframes, ignore_index=True)
+    return dados_fundos_total
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+# Renomear colunas e limpar dados
+def limpar_dados(dados_fundos_total):
+    dados_fundos_total = dados_fundos_total.rename(columns={
+ 'TP_FUNDO': 'Tipo Fundo',
+    'CNPJ_FUNDO': 'CNPJ Fundo',
+    'DENOM_SOCIAL': 'Denominação Social',
+    'DT_COMPTC': 'Data Competência',
+    'ID_DOC': 'ID Documento',
+    'VL_PATRIM_LIQ': 'Patrimônio Líquido',
+    'TP_APLIC': 'Tipo Aplicação',
+    'TP_ATIVO': 'Tipo Ativo',
+    'EMISSOR_LIGADO': 'Emissor Ligado',
+    'TP_NEGOC': 'Tipo Negociação',
+    'QT_VENDA_NEGOC': 'Quantidade Venda Negociada',
+    'VL_VENDA_NEGOC': 'Valor Venda Negociada',
+    'QT_AQUIS_NEGOC': 'Quantidade Aquisição Negociada',
+    'VL_AQUIS_NEGOC': 'Valor Aquisição Negociada',
+    'QT_POS_FINAL': 'Quantidade Posição Final',
+    'VL_MERC_POS_FINAL': 'Valor Mercado Posição Final',
+    'VL_CUSTO_POS_FINAL': 'Valor Custo Posição Final',
+    'DT_CONFID_APLIC': 'Data Confidencial Aplicação',
+    'CD_ATIVO': 'Código Ativo',
+    'DS_ATIVO': 'Descrição Ativo',
+    'DT_VENC': 'Data Vencimento',
+    'PF_PJ_EMISSOR': 'Pessoa Física/Jurídica Emissor',
+    'CPF_CNPJ_EMISSOR': 'CPF/CNPJ Emissor',
+    'EMISSOR': 'Emissor',
+    'RISCO_EMISSOR': 'Risco Emissor',
+    'CD_SELIC': 'Código Selic',
+    'DT_INI_VIGENCIA': 'Data Início Vigência',
+    'CD_PAIS': 'Código País',
+    'PAIS': 'País',
+    'CD_BV_MERC': 'Código BV Mercado',
+    'BV_MERC': 'BV Mercado',
+    'TP_TITPUB': 'Tipo Título Público',
+    'CD_ISIN': 'Código ISIN',
+    'DT_EMISSAO': 'Data Emissão',
+    'CNPJ_FUNDO_COTA': 'CNPJ Fundo Cota',
+    'NM_FUNDO_COTA': 'Nome Fundo Cota',
+    'CD_SWAP': 'Código Swap',
+    'DS_SWAP': 'Descrição Swap',
+    'DT_FIM_VIGENCIA': 'Data Fim Vigência',
+    'CNPJ_EMISSOR': 'CNPJ Emissor',
+    'TITULO_POSFX': 'Título Pós-Fixado',
+    'CD_INDEXADOR_POSFX': 'Código Indexador Pós-Fixado',
+    'DS_INDEXADOR_POSFX': 'Descrição Indexador Pós-Fixado',
+    'PR_INDEXADOR_POSFX': 'Percentual Indexador Pós-Fixado',
+    'PR_CUPOM_POSFX': 'Percentual Cupom Pós-Fixado',
+    'PR_TAXA_PREFX': 'Percentual Taxa Pré-Fixada',
+    'AG_RISCO': 'Agência de Risco',
+    'DT_RISCO': 'Data Risco',
+    'GRAU_RISCO': 'Grau de Risco',
+    'TITULO_CETIP': 'Título Cetip',
+    'TITULO_GARANTIA': 'Título Garantia',
+    'CNPJ_INSTITUICAO_FINANC_COOBR': 'CNPJ Instituição Financeira Coobrigada',
+    'INVEST_COLETIVO': 'Investimento Coletivo',
+    'INVEST_COLETIVO_GESTOR': 'Gestor Investimento Coletivo',
+    'CD_ATIVO_BV_MERC': 'Código Ativo BV Mercado',
+    'DS_ATIVO_EXTERIOR': 'Descrição Ativo Exterior',
+    'QT_ATIVO_EXTERIOR': 'Quantidade Ativo Exterior',
+    'VL_ATIVO_EXTERIOR': 'Valor Ativo Exterior',
+        # Continue renomeando conforme necessário...
+    })
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+    # Excluir colunas específicas
+    colunas_para_excluir = ['Quantidade Venda Negociada', 'Quantidade Aquisição Negociada',
+                            'Quantidade Posição Final', 'Quantidade Ativo Exterior', 'Emissor Ligado',
+                            'Tipo Negociação', 'Valor Aquisição Negociada', 'Valor Venda Negociada',
+                            'Data Confidencial Aplicação', 'Risco Emissor', 'Código Selic',
+                            'Data Início Vigência', 'Código ISIN', 'Data Fim Vigência','Código BV Mercado','BV Mercado','Valor Custo Posição Final','Pessoa Física/Jurídica Emissor','Código País','País','Código Indexador Pós-Fixado','Descrição Swap','Código Swap','Descrição Indexador Pós-Fixado','Percentual Indexador Pós-Fixado', 'Percentual Cupom Pós-Fixado', 'Percentual Taxa Pré-Fixada',  'Agência de Risco',  'Data Risco',  'Grau de Risco', 'Título Cetip', 'Título Garantia',  'CNPJ Instituição Financeira Coobrigada',  'Investimento Coletivo', 'Gestor Investimento Coletivo', 'Código Ativo BV Mercado', 'Descrição Ativo Exterior', 'Quantidade Ativo Exterior', 'Valor Ativo Exterior']
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+    dados_fundos_total = dados_fundos_total.drop(columns=colunas_para_excluir)
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+    # Remover colunas onde todos os valores são nulos
+    dados_fundos_total = dados_fundos_total.dropna(axis=1, how='all')
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
+    return dados_fundos_total
+
+# Título do Dashboard
+st.title("Fundos de Investimento - CVM")
+
+# Parâmetros para o usuário escolher o ano e o mês
+st.sidebar.header("Parâmetros de Data")
+ano = st.sidebar.selectbox("Selecione o Ano:", ["2024", "2023"])
+mes = st.sidebar.selectbox("Selecione o Mês:", ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"])
+
+# Carregar os dados usando a função
+dados_fundos_total = carregar_dados_cvm(ano, mes)
+
+# Limpar os dados
+dados_fundos_total = limpar_dados(dados_fundos_total)
+
+# Criar filtros no dashboard para o usuário escolher
+st.sidebar.header("Filtros")
+cnpj_filtro = st.sidebar.text_input("Filtrar por CNPJ do Fundo:")
+tipo_aplicacao_filtro = st.sidebar.multiselect("Filtrar por Tipo de Aplicação:",
+                                               options=dados_fundos_total['Tipo Aplicação'].unique())
+
+# Aplicar os filtros
+dados_filtrados = dados_fundos_total
+
+if cnpj_filtro:
+    dados_filtrados = dados_filtrados[dados_filtrados['CNPJ Fundo'] == cnpj_filtro]
+
+# Exibir as informações básicas do fundo, se filtrado
+if cnpj_filtro and not dados_filtrados.empty:
+    fundo_info = dados_filtrados.iloc[0]  # Pega a primeira linha com as informações básicas
+    st.write("### Informações do Fundo:")
+    st.write(f"**Denominação Social**: {fundo_info['Denominação Social']}")
+    st.write(f"**Tipo Fundo**: {fundo_info['Tipo Fundo']}")
+    st.write(f"**Patrimônio Líquido**: R$ {fundo_info['Patrimônio Líquido']:,}")
+
+if tipo_aplicacao_filtro:
+    dados_filtrados = dados_filtrados[dados_filtrados['Tipo Aplicação'].isin(tipo_aplicacao_filtro)]
+
+# Exibir os dados filtrados
+st.write("### Dados Filtrados:")
+st.dataframe(dados_filtrados)
+
+
+import matplotlib.pyplot as plt
+
+# Gráfico de Pizza
+st.write("### Gráfico de Distribuição por Tipo de Aplicação:")
+
+# Filtrar dados para remover valores nulos e negativos
+grafico_dados = dados_filtrados.groupby('Tipo Aplicação')['Valor Mercado Posição Final'].sum().reset_index()
+grafico_dados = grafico_dados[grafico_dados['Valor Mercado Posição Final'] > 0]  # Filtra valores positivos
+
+# Verificar se existem dados após o filtro
+if not grafico_dados.empty:
+    # Criar o gráfico de pizza sem percentuais nas fatias
+    fig, ax = plt.subplots()
+    wedges, texts = ax.pie(
+        grafico_dados['Valor Mercado Posição Final'],
+        labels=None,  # Não usar labels diretamente nas fatias
+        startangle=90,
+        wedgeprops={'linewidth': 1, 'edgecolor': 'white'}  # Adicionar bordas brancas para melhor visualização
     )
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
-
-    return gdp_df
-
-gdp_df = get_gdp_data()
-
-# -----------------------------------------------------------------------------
-# Draw the actual page
-
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
-
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
-
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
+    # Criar a legenda com o percentual calculado manualmente
+    legenda = [
+        f'{label}: {percent:.1f}%' for label, percent in zip(
+            grafico_dados['Tipo Aplicação'],
+            100 * grafico_dados['Valor Mercado Posição Final'] / grafico_dados['Valor Mercado Posição Final'].sum()
         )
+    ]
+
+    # Adicionar a legenda externa com percentuais
+    ax.legend(wedges, legenda, title="Tipo de Aplicação", loc="center left", bbox_to_anchor=(1, 0, 0.5, 1))
+
+    # Ajustar o gráfico para exibir bem a legenda
+    plt.tight_layout()
+
+    # Exibir o gráfico no Streamlit
+    st.pyplot(fig)
