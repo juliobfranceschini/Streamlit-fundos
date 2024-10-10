@@ -1,2 +1,8 @@
 streamlit
 pandas
+matplotlib
+zipfile
+io
+requests
+string
+Xlsxwriter
