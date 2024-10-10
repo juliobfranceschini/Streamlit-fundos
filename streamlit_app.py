@@ -3,7 +3,6 @@ import pandas as pd
 import zipfile
 import io
 import requests
-import matplotlib.pyplot as plt
 
 # Função para carregar e concatenar os dados a partir de vários arquivos ZIP
 def carregar_dados_cvm(ano, mes):
@@ -87,66 +86,91 @@ def limpar_dados(dados_fundos_total):
                             'Tipo Negociação', 'Valor Aquisição Negociada', 'Valor Venda Negociada',
                             'Data Confidencial Aplicação', 'Risco Emissor', 'Código Selic',
                             'Data Início Vigência', 'Código ISIN', 'Data Fim Vigência','Código BV Mercado','BV Mercado','Valor Custo Posição Final','Pessoa Física/Jurídica Emissor','Código País','País','Código Indexador Pós-Fixado','Descrição Swap','Código Swap','Descrição Indexador Pós-Fixado','Percentual Indexador Pós-Fixado', 'Percentual Cupom Pós-Fixado', 'Percentual Taxa Pré-Fixada',  'Agência de Risco',  'Data Risco',  'Grau de Risco', 'Título Cetip', 'Título Garantia',  'CNPJ Instituição Financeira Coobrigada',  'Investimento Coletivo', 'Gestor Investimento Coletivo', 'Código Ativo BV Mercado', 'Descrição Ativo Exterior', 'Quantidade Ativo Exterior', 'Valor Ativo Exterior']
+
     dados_fundos_total = dados_fundos_total.drop(columns=colunas_para_excluir)
+
+    # Remover colunas onde todos os valores são nulos
+    dados_fundos_total = dados_fundos_total.dropna(axis=1, how='all')
+
+
     return dados_fundos_total
 
-# Função para comparar a composição de dois meses
-def comparar_meses(df_mes1, df_mes2):
-    df_agrupado_mes1 = df_mes1.groupby('Tipo Aplicação')['Valor Mercado Posição Final'].sum().reset_index()
-    df_agrupado_mes2 = df_mes2.groupby('Tipo Aplicação')['Valor Mercado Posição Final'].sum().reset_index()
-
-    # Combinar os dados para comparar
-    comparacao = pd.merge(df_agrupado_mes1, df_agrupado_mes2, on='Tipo Aplicação', how='outer', suffixes=('_mes1', '_mes2'))
-    
-    # Preencher valores NaN com 0
-    comparacao = comparacao.fillna(0)
-
-    # Calcular a variação percentual
-    comparacao['Variação (%)'] = ((comparacao['Valor Mercado Posição Final_mes2'] - comparacao['Valor Mercado Posição Final_mes1']) / comparacao['Valor Mercado Posição Final_mes1']) * 100
-
-    return comparacao
-
 # Título do Dashboard
-st.title("Fundos de Investimento - Comparação entre Meses")
+st.title("Fundos de Investimento - CVM")
 
-# Parâmetros para o usuário escolher os dois meses
-st.sidebar.header("Selecione os Meses para Comparação")
+# Parâmetros para o usuário escolher o ano e o mês
+st.sidebar.header("Parâmetros de Data")
 ano = st.sidebar.selectbox("Selecione o Ano:", ["2024", "2023"])
-mes1 = st.sidebar.selectbox("Selecione o Primeiro Mês:", ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"])
-mes2 = st.sidebar.selectbox("Selecione o Segundo Mês:", ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"])
+mes = st.sidebar.selectbox("Selecione o Mês:", ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"])
 
-# Carregar os dados dos dois meses
-dados_mes1 = carregar_dados_cvm(ano, mes1)
-dados_mes2 = carregar_dados_cvm(ano, mes2)
+# Carregar os dados usando a função
+dados_fundos_total = carregar_dados_cvm(ano, mes)
 
 # Limpar os dados
-dados_mes1 = limpar_dados(dados_mes1)
-dados_mes2 = limpar_dados(dados_mes2)
+dados_fundos_total = limpar_dados(dados_fundos_total)
 
-# Exibir as informações básicas do fundo
+# Criar filtros no dashboard para o usuário escolher
+st.sidebar.header("Filtros")
 cnpj_filtro = st.sidebar.text_input("Filtrar por CNPJ do Fundo:")
+tipo_aplicacao_filtro = st.sidebar.multiselect("Filtrar por Tipo de Aplicação:",
+                                               options=dados_fundos_total['Tipo Aplicação'].unique())
+
+# Aplicar os filtros
+dados_filtrados = dados_fundos_total
+
 if cnpj_filtro:
-    dados_mes1 = dados_mes1[dados_mes1['CNPJ Fundo'] == cnpj_filtro]
-    dados_mes2 = dados_mes2[dados_mes2['CNPJ Fundo'] == cnpj_filtro]
+    dados_filtrados = dados_filtrados[dados_filtrados['CNPJ Fundo'] == cnpj_filtro]
+
+# Exibir as informações básicas do fundo, se filtrado
+if cnpj_filtro and not dados_filtrados.empty:
+    fundo_info = dados_filtrados.iloc[0]  # Pega a primeira linha com as informações básicas
+    st.write("### Informações do Fundo:")
+    st.write(f"**Denominação Social**: {fundo_info['Denominação Social']}")
+    st.write(f"**Tipo Fundo**: {fundo_info['Tipo Fundo']}")
+    st.write(f"**Patrimônio Líquido**: R$ {fundo_info['Patrimônio Líquido']:,}")
+
+if tipo_aplicacao_filtro:
+    dados_filtrados = dados_filtrados[dados_filtrados['Tipo Aplicação'].isin(tipo_aplicacao_filtro)]
 
 # Exibir os dados filtrados
-st.write(f"### Dados de {mes1}/{ano}:")
-st.dataframe(dados_mes1[['Denominação Social', 'Tipo Fundo', 'Patrimônio Líquido']].drop_duplicates())
+st.write("### Dados Filtrados:")
+st.dataframe(dados_filtrados)
 
-st.write(f"### Dados de {mes2}/{ano}:")
-st.dataframe(dados_mes2[['Denominação Social', 'Tipo Fundo', 'Patrimônio Líquido']].drop_duplicates())
 
-# Comparar a composição dos dois meses
-comparacao = comparar_meses(dados_mes1, dados_mes2)
+import matplotlib.pyplot as plt
 
-# Exibir a comparação
-st.write("### Comparação da Composição por Tipo de Aplicação:")
-st.dataframe(comparacao)
+# Gráfico de Pizza
+st.write("### Gráfico de Distribuição por Tipo de Aplicação:")
 
-# Gráfico de barras para mostrar a variação percentual
-st.write("### Gráfico de Variação Percentual entre os Meses")
-fig, ax = plt.subplots()
-ax.barh(comparacao['Tipo Aplicação'], comparacao['Variação (%)'], color='skyblue')
-ax.set_xlabel('Variação (%)')
-ax.set_ylabel('Tipo de Aplicação')
-st.pyplot(fig)
+# Filtrar dados para remover valores nulos e negativos
+grafico_dados = dados_filtrados.groupby('Tipo Aplicação')['Valor Mercado Posição Final'].sum().reset_index()
+grafico_dados = grafico_dados[grafico_dados['Valor Mercado Posição Final'] > 0]  # Filtra valores positivos
+
+# Verificar se existem dados após o filtro
+if not grafico_dados.empty:
+    # Criar o gráfico de pizza sem percentuais nas fatias
+    fig, ax = plt.subplots()
+    wedges, texts = ax.pie(
+        grafico_dados['Valor Mercado Posição Final'],
+        labels=None,  # Não usar labels diretamente nas fatias
+        startangle=90,
+        wedgeprops={'linewidth': 1, 'edgecolor': 'white'}  # Adicionar bordas brancas para melhor visualização
+    )
+
+    # Criar a legenda com o percentual calculado manualmente
+    legenda = [
+        f'{label}: {percent:.1f}%' for label, percent in zip(
+            grafico_dados['Tipo Aplicação'],
+            100 * grafico_dados['Valor Mercado Posição Final'] / grafico_dados['Valor Mercado Posição Final'].sum()
+        )
+    ]
+
+    # Adicionar a legenda externa com percentuais
+    ax.legend(wedges, legenda, title="Tipo de Aplicação", loc="center left", bbox_to_anchor=(1, 0, 0.5, 1))
+
+    # Ajustar o gráfico para exibir bem a legenda
+    plt.tight_layout()
+
+    # Exibir o gráfico no Streamlit
+    st.pyplot(fig)
+
