@@ -173,4 +173,3 @@ if not grafico_dados.empty:
 
     # Exibir o gráfico no Streamlit
     st.pyplot(fig)
-
