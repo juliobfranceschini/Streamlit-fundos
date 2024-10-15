@@ -80,6 +80,19 @@ def limpar_dados(dados_fundos_total):
         # Continue renomeando conforme necessário...
     })
 
+    # Excluir colunas específicas
+    colunas_para_excluir = ['Quantidade Venda Negociada', 'Quantidade Aquisição Negociada',
+                            'Quantidade Posição Final', 'Quantidade Ativo Exterior', 'Emissor Ligado',
+                            'Tipo Negociação', 'Valor Aquisição Negociada', 'Valor Venda Negociada',
+                            'Data Confidencial Aplicação', 'Risco Emissor', 'Código Selic',
+                            'Data Início Vigência', 'Código ISIN', 'Data Fim Vigência','Código BV Mercado','BV Mercado','Valor Custo Posição Final','Pessoa Física/Jurídica Emissor','Código País','País','Código Indexador Pós-Fixado','Descrição Swap','Código Swap','Descrição Indexador Pós-Fixado','Percentual Indexador Pós-Fixado', 'Percentual Cupom Pós-Fixado', 'Percentual Taxa Pré-Fixada',  'Agência de Risco',  'Data Risco',  'Grau de Risco', 'Título Cetip', 'Título Garantia',  'CNPJ Instituição Financeira Coobrigada',  'Investimento Coletivo', 'Gestor Investimento Coletivo', 'Código Ativo BV Mercado', 'Descrição Ativo Exterior', 'Quantidade Ativo Exterior', 'Valor Ativo Exterior']
+
+    dados_fundos_total = dados_fundos_total.drop(columns=colunas_para_excluir)
+
+    # Remover colunas onde todos os valores são nulos
+    dados_fundos_total = dados_fundos_total.dropna(axis=1, how='all')
+
+
     return dados_fundos_total
 
 # Título do Dashboard
@@ -95,13 +108,6 @@ dados_fundos_total = carregar_dados_cvm(ano, mes)
 
 # Limpar os dados
 dados_fundos_total = limpar_dados(dados_fundos_total)
-
-# Permitir que o usuário selecione as colunas para excluir
-colunas_para_excluir = st.sidebar.multiselect("Selecione as Colunas para Excluir:", dados_fundos_total.columns)
-
-# Aplicar exclusão de colunas se houver seleção
-if colunas_para_excluir:
-    dados_fundos_total = dados_fundos_total.drop(columns=colunas_para_excluir)
 
 # Criar filtros no dashboard para o usuário escolher
 st.sidebar.header("Filtros")
@@ -129,6 +135,7 @@ if tipo_aplicacao_filtro:
 # Exibir os dados filtrados
 st.write("### Dados Filtrados:")
 st.dataframe(dados_filtrados)
+
 
 import matplotlib.pyplot as plt
 
@@ -166,3 +173,4 @@ if not grafico_dados.empty:
 
     # Exibir o gráfico no Streamlit
     st.pyplot(fig)
+
