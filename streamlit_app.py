@@ -61,8 +61,8 @@ for mes in range(1, 13):
         if dados_mes is not None:
             dados_acumulados = pd.concat([dados_acumulados, dados_mes], axis=0)
 
-# Verificar e processar os dados se disponíveis
-if not dados_acumulados.empty:
+# Verificar se dados_acumulados possui as colunas necessárias
+if not dados_acumulados.empty and {'Data Competência', 'Tipo Aplicação', 'Valor Mercado Posição Final'}.issubset(dados_acumulados.index.names):
     # Reset index to have 'Data Competência' and 'Tipo Aplicação' as columns
     dados_acumulados = dados_acumulados.reset_index()
     df_por_mes = dados_acumulados.pivot(index='Data Competência', columns='Tipo Aplicação', values='Valor Mercado Posição Final').fillna(0)
