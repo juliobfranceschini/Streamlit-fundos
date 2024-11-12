@@ -13,7 +13,8 @@ st.write('Insira o CNPJ do fundo e selecione o ano para visualizar a composiçã
 cnpj_especifico = st.text_input("Digite o CNPJ do fundo", '09.136.668/0001-35')
 ano = st.selectbox("Selecione o ano", ['2024'])
 
-# Função para baixar e processar dados de um mês específico e já aplicar o filtro pelo CNPJ
+# Função para baixar e processar dados de um mês específico aplicando filtro de CNPJ e agregando resultados
+@st.cache_data(show_spinner=False)
 def processar_dados_mes_filtrado(ano, mes, cnpj_especifico):
     url = f'https://dados.cvm.gov.br/dados/FI/DOC/CDA/DADOS/cda_fi_{ano}{mes:02}.zip'
     try:
@@ -36,17 +37,16 @@ def processar_dados_mes_filtrado(ano, mes, cnpj_especifico):
                     # Filtrar pelo CNPJ especificado
                     df_filtrado = df[df['CNPJ Fundo'] == cnpj_especifico]
                     
-                    # Transformar a data de competência para o nome do mês
-                    df_filtrado['Data Competência'] = pd.to_datetime(df_filtrado['Data Competência']).dt.strftime('%B')
-                    
-                    # Adicionar à lista somente se houver dados relevantes
+                    # Transformar a data de competência para o nome do mês e agregar
                     if not df_filtrado.empty:
-                        dataframes.append(df_filtrado)
+                        df_filtrado['Data Competência'] = pd.to_datetime(df_filtrado['Data Competência']).dt.strftime('%B')
+                        df_agg = df_filtrado.groupby(['Data Competência', 'Tipo Aplicação'])['Valor Mercado Posição Final'].sum()
+                        dataframes.append(df_agg)
                 except Exception as e:
                     st.warning(f"Erro ao ler o arquivo {file} no mês {mes:02}: {e}")
             
-            # Concatenar os dados filtrados do mês
-            return pd.concat(dataframes, ignore_index=True) if dataframes else None
+            # Concatenar e retornar os dados agregados do mês
+            return pd.concat(dataframes) if dataframes else None
     except requests.exceptions.RequestException as e:
         st.error(f"Erro ao baixar os dados do mês {mes:02}: {e}")
         return None
@@ -54,18 +54,20 @@ def processar_dados_mes_filtrado(ano, mes, cnpj_especifico):
 # Inicializar DataFrame para acumular dados agregados por mês
 dados_acumulados = pd.DataFrame()
 
-# Processamento incremental: carregar dados mês a mês e aplicar o filtro de CNPJ
+# Processamento incremental: carregar e agregar dados mês a mês
 for mes in range(1, 13):
     with st.spinner(f"Baixando e processando dados para {ano}-{mes:02}..."):
         dados_mes = processar_dados_mes_filtrado(ano, mes, cnpj_especifico)
         if dados_mes is not None:
-            # Agregar diretamente sobre o acumulado para evitar carregar muitos dados na memória
-            dados_acumulados = pd.concat([dados_acumulados, dados_mes], ignore_index=True)
+            dados_acumulados = pd.concat([dados_acumulados, dados_mes], axis=0)
 
 # Verificar e processar os dados se disponíveis
 if not dados_acumulados.empty:
-    # Agrupar dados para composição de todos os meses
-    df_por_mes = dados_acumulados.groupby(['Data Competência', 'Tipo Aplicação'])['Valor Mercado Posição Final'].sum().unstack().fillna(0)
+    # Reset index to have 'Data Competência' and 'Tipo Aplicação' as columns
+    dados_acumulados = dados_acumulados.reset_index()
+    df_por_mes = dados_acumulados.pivot(index='Data Competência', columns='Tipo Aplicação', values='Valor Mercado Posição Final').fillna(0)
+
+    # Calcular o percentual de cada aplicação em relação ao total do mês
     df_por_mes_percentual = df_por_mes.divide(df_por_mes.sum(axis=1).replace(0, 1), axis=0) * 100
     df_por_mes_percentual = df_por_mes_percentual.apply(lambda x: x.where(x >= 0.5, other=0))
 
