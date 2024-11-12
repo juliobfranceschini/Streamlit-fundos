@@ -3,88 +3,79 @@ import requests
 import zipfile
 import io
 import pandas as pd
+import matplotlib.pyplot as plt
 
-# Function to download and process data for a specified year and month, with caching
-@st.cache_data(show_spinner=False)
+# Configuração do título do dashboard
+st.title('Dashboard de Composição de Fundos de Investimento')
+st.write('Insira o CNPJ do fundo e selecione o ano e mês para visualizar a composição.')
+
+# Input do CNPJ do fundo e seleção de ano e mês
+cnpj_especifico = st.text_input("Digite o CNPJ do fundo", '09.136.668/0001-35')
+ano = st.selectbox("Selecione o ano", ['2024'])
+mes = st.selectbox("Selecione o mês", range(1, 13))
+
+# Função para processar e baixar dados
+@st.cache_data
 def processar_dados(ano, mes):
-    # URL para o arquivo ZIP da CVM para o ano e mês especificados
     url = f'https://dados.cvm.gov.br/dados/FI/DOC/CDA/DADOS/cda_fi_{ano}{mes:02}.zip'
-    st.write(f"Baixando dados de {ano}-{mes:02}...")
-
-    # Baixar o arquivo ZIP
     response = requests.get(url)
-
-    # Verificar se o download foi bem-sucedido
+    
     if response.status_code == 200:
         with zipfile.ZipFile(io.BytesIO(response.content), 'r') as arquivo_zip:
-            dataframes = []
-            # Iterar sobre todos os arquivos CSV no ZIP, carregando apenas colunas necessárias
-            for file_name in arquivo_zip.namelist():
-                df = pd.read_csv(arquivo_zip.open(file_name), sep=';', encoding='ISO-8859-1',
-                                 usecols=['TP_FUNDO', 'CNPJ_FUNDO', 'DENOM_SOCIAL', 'DT_COMPTC', 'VL_PATRIM_LIQ', 
-                                          'TP_APLIC', 'VL_MERC_POS_FINAL'])
-                dataframes.append(df)
-
-            # Concatenar todos os DataFrames em um único
+            dataframes = [pd.read_csv(arquivo_zip.open(file), sep=';', encoding='ISO-8859-1') 
+                          for file in arquivo_zip.namelist()]
             dados_fundos_total = pd.concat(dataframes, ignore_index=True)
-
-            # Renomear colunas para melhorar a legibilidade
+            # Renomear colunas conforme necessidade
             dados_fundos_total = dados_fundos_total.rename(columns={
-                'TP_FUNDO': 'Tipo Fundo',
-                'CNPJ_FUNDO': 'CNPJ Fundo',
-                'DENOM_SOCIAL': 'Denominação Social',
-                'DT_COMPTC': 'Data Competência',
-                'VL_PATRIM_LIQ': 'Patrimônio Líquido',
-                'TP_APLIC': 'Tipo Aplicação',
-                'VL_MERC_POS_FINAL': 'Valor Mercado Posição Final',
+                'TP_FUNDO': 'Tipo Fundo', 'CNPJ_FUNDO': 'CNPJ Fundo',
+                'VL_PATRIM_LIQ': 'Patrimônio Líquido', 'VL_MERC_POS_FINAL': 'Valor Mercado Posição Final',
+                'DT_COMPTC': 'Data Competência', 'DENOM_SOCIAL': 'Denominação Social',
+                'TP_APLIC': 'Tipo Aplicação', 'TP_ATIVO': 'Tipo Ativo',
+                # Adicione outras renomeações conforme necessário
             })
-
-            # Calcular o percentual de aplicação em relação ao patrimônio líquido
-            if 'Valor Mercado Posição Final' in dados_fundos_total.columns and 'Patrimônio Líquido' in dados_fundos_total.columns:
-                dados_fundos_total['Percentual Aplicação'] = (
-                    dados_fundos_total['Valor Mercado Posição Final'] / dados_fundos_total['Patrimônio Líquido']
-                ) * 100
-
             return dados_fundos_total
     else:
-        st.error(f"Erro ao baixar dados de {ano}-{mes:02}. URL: {url}")
+        st.error("Erro ao baixar os dados.")
         return None
 
-# Layout da App Streamlit
-st.title("Dashboard de Fundos CVM")
+# Processamento dos dados
+dados_fundos_total = processar_dados(ano, mes)
 
-# Inputs para o ano e mês
-ano = st.selectbox("Selecione o Ano", options=['2024', '2023'])
-mes = st.selectbox("Selecione o Mês", options=range(1, 13), format_func=lambda x: f"{x:02}")
+if dados_fundos_total is not None:
+    # Filtrar pelo CNPJ especificado
+    filtro_cnpj = dados_fundos_total[dados_fundos_total['CNPJ Fundo'] == cnpj_especifico].copy()
+    
+    # Verificar a existência do DataFrame filtrado
+    if not filtro_cnpj.empty:
+        filtro_cnpj['Data Competência'] = filtro_cnpj['Data Competência'].str[:10]
 
-# Botão para carregar dados
-if st.button("Carregar Dados"):
-    df = processar_dados(ano, mes)
-    if df is not None:
-        st.write("Dados Carregados com Sucesso!")
-        
-        # Exibir uma amostra dos dados
-        st.subheader("Amostra dos Dados")
-        st.dataframe(df.head())
+        # Ajustar 'Tipo Aplicação' usando 'Tipo Título Público' quando relevante
+        if 'Tipo Título Público' in filtro_cnpj.columns:
+            filtro_cnpj.loc[
+                (filtro_cnpj['Tipo Aplicação'] == 'Títulos Públicos') & 
+                (filtro_cnpj['Tipo Título Público'].notna()),
+                'Tipo Aplicação'
+            ] = filtro_cnpj['Tipo Título Público']
 
-        # Se o DataFrame estiver muito grande, solicite ao usuário para carregar tudo
-        if len(df) > 10000:
-            st.warning("Os dados são muito grandes. Apenas uma amostra foi carregada.")
-            if st.checkbox("Carregar todos os dados? Isso pode demorar."):
-                st.write("Carregando todos os dados...")
-                st.dataframe(df)
+        # Agrupar dados para composição
+        df_por_mes = filtro_cnpj.groupby(['Data Competência', 'Tipo Aplicação'])['Valor Mercado Posição Final'].sum().unstack().fillna(0)
+        df_por_mes.index = pd.to_datetime(df_por_mes.index).strftime('%B')
+        df_por_mes_percentual = df_por_mes.divide(df_por_mes.sum(axis=1).replace(0, 1), axis=0) * 100
+        df_por_mes_percentual = df_por_mes_percentual.apply(lambda x: x.where(x >= 0.5, other=0))
 
-        # Opções de Visualização
-        st.subheader("Visualizações")
-        
-        # Escolha do tipo de gráfico
-        chart_type = st.selectbox("Escolha o Tipo de Gráfico", ["Barras", "Pizza"])
-        
-        # Agrupamento por "Tipo Aplicação" e cálculo da soma percentual
-        resumo_aplicacao = df.groupby("Tipo Aplicação")['Percentual Aplicação'].sum().sort_values(ascending=False)
-        
-        # Exibir o gráfico escolhido
-        if chart_type == "Barras":
-            st.bar_chart(resumo_aplicacao)
-        elif chart_type == "Pizza":
-            st.pyplot(resumo_aplicacao.plot(kind='pie', autopct='%1.1f%%').get_figure())
+        # Ordenar colunas globalmente
+        global_totals = df_por_mes_percentual.sum(axis=0).sort_values(ascending=False).index
+        df_por_mes_percentual_sorted = df_por_mes_percentual[global_totals]
+
+        # Plot do gráfico
+        fig, ax = plt.subplots(figsize=(12, 6))
+        df_por_mes_percentual_sorted.plot(kind='bar', stacked=True, ax=ax)
+        ax.set_title(f'Composição do Fundo {cnpj_especifico} em {ano}-{mes:02}')
+        ax.get_yaxis().set_visible(False)
+        ax.set_xlabel('')
+        for c in ax.containers:
+            labels = [f'{v:.1f}%' if v >= 0.5 else '' for v in c.datavalues]
+            ax.bar_label(c, labels=labels, label_type='center', fontsize=10)
+        st.pyplot(fig)
+    else:
+        st.write("Nenhum dado encontrado para o CNPJ informado.")
