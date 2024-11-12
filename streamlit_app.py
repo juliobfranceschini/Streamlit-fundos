@@ -15,37 +15,42 @@ ano = st.selectbox("Selecione o ano", ['2024'])
 
 # Função para processar e baixar dados mês a mês
 @st.cache_data
-def baixar_dados_mes(ano, mes):
+def baixar_dados_mes(ano, mes, cnpj_especifico):
     url = f'https://dados.cvm.gov.br/dados/FI/DOC/CDA/DADOS/cda_fi_{ano}{mes:02}.zip'
     try:
         response = requests.get(url, timeout=10)  # Timeout de 10 segundos
         response.raise_for_status()
         with zipfile.ZipFile(io.BytesIO(response.content), 'r') as arquivo_zip:
-            dataframes = [pd.read_csv(arquivo_zip.open(file), sep=';', encoding='ISO-8859-1') 
+            dataframes = [pd.read_csv(arquivo_zip.open(file), sep=';', encoding='ISO-8859-1', 
+                                      usecols=['CNPJ_FUNDO', 'VL_PATRIM_LIQ', 'VL_MERC_POS_FINAL', 
+                                               'DT_COMPTC', 'DENOM_SOCIAL', 'TP_APLIC', 'TP_ATIVO']) 
                           for file in arquivo_zip.namelist()]
             dados_mes = pd.concat(dataframes, ignore_index=True)
             dados_mes = dados_mes.rename(columns={
-                'TP_FUNDO': 'Tipo Fundo', 'CNPJ_FUNDO': 'CNPJ Fundo',
-                'VL_PATRIM_LIQ': 'Patrimônio Líquido', 'VL_MERC_POS_FINAL': 'Valor Mercado Posição Final',
-                'DT_COMPTC': 'Data Competência', 'DENOM_SOCIAL': 'Denominação Social',
-                'TP_APLIC': 'Tipo Aplicação', 'TP_ATIVO': 'Tipo Ativo',
-                # Outras renomeações conforme necessário
+                'CNPJ_FUNDO': 'CNPJ Fundo', 'VL_PATRIM_LIQ': 'Patrimônio Líquido',
+                'VL_MERC_POS_FINAL': 'Valor Mercado Posição Final', 'DT_COMPTC': 'Data Competência',
+                'DENOM_SOCIAL': 'Denominação Social', 'TP_APLIC': 'Tipo Aplicação', 
+                'TP_ATIVO': 'Tipo Ativo',
             })
-            return dados_mes
+            # Filtrar pelo CNPJ especificado
+            dados_filtrados = dados_mes[dados_mes['CNPJ Fundo'] == cnpj_especifico]
+            return dados_filtrados if not dados_filtrados.empty else None
     except requests.exceptions.RequestException as e:
         st.error(f"Erro ao baixar os dados do mês {mes:02}: {e}")
         return None
 
-# Baixar e filtrar dados para o ano selecionado
+# Baixar e filtrar dados para o ano selecionado, com opção de parar se não houver dados
 todos_dados = []
 for mes in range(1, 13):
     with st.spinner(f"Baixando dados para {ano}-{mes:02}..."):
-        dados_mes = baixar_dados_mes(ano, mes)
-        if dados_mes is not None:
-            # Filtrar pelo CNPJ especificado para reduzir uso de memória
-            dados_filtrados = dados_mes[dados_mes['CNPJ Fundo'] == cnpj_especifico]
-            if not dados_filtrados.empty:
-                todos_dados.append(dados_filtrados)
+        dados_filtrados = baixar_dados_mes(ano, mes, cnpj_especifico)
+        if dados_filtrados is not None:
+            todos_dados.append(dados_filtrados)
+        else:
+            st.write(f"Nenhum dado encontrado para o CNPJ {cnpj_especifico} no mês {mes:02}.")
+    # Checar o uso de memória após cada mês
+    if len(todos_dados) > 10:  # Condicional para parar caso já tenha 10 meses baixados, adaptável
+        break
 
 # Concatenar todos os dados filtrados
 if todos_dados:
@@ -57,19 +62,10 @@ else:
 # Verificar e processar os dados se disponíveis
 if dados_fundos_total is not None and not dados_fundos_total.empty:
     # Ajustar a coluna 'Data Competência' para o formato correto
-    dados_fundos_total['Data Competência'] = dados_fundos_total['Data Competência'].str[:10]
-    
-    # Ajustar 'Tipo Aplicação' usando 'Tipo Título Público' quando relevante
-    if 'Tipo Título Público' in dados_fundos_total.columns:
-        dados_fundos_total.loc[
-            (dados_fundos_total['Tipo Aplicação'] == 'Títulos Públicos') & 
-            (dados_fundos_total['Tipo Título Público'].notna()),
-            'Tipo Aplicação'
-        ] = dados_fundos_total['Tipo Título Público']
+    dados_fundos_total['Data Competência'] = pd.to_datetime(dados_fundos_total['Data Competência']).dt.strftime('%B')
 
     # Agrupar dados para composição de todos os meses
     df_por_mes = dados_fundos_total.groupby(['Data Competência', 'Tipo Aplicação'])['Valor Mercado Posição Final'].sum().unstack().fillna(0)
-    df_por_mes.index = pd.to_datetime(df_por_mes.index).strftime('%B')
     df_por_mes_percentual = df_por_mes.divide(df_por_mes.sum(axis=1).replace(0, 1), axis=0) * 100
     df_por_mes_percentual = df_por_mes_percentual.apply(lambda x: x.where(x >= 0.5, other=0))
 
