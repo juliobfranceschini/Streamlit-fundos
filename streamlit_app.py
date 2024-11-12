@@ -21,10 +21,26 @@ def baixar_dados_mes(ano, mes, cnpj_especifico):
         response = requests.get(url, timeout=10)  # Timeout de 10 segundos
         response.raise_for_status()
         with zipfile.ZipFile(io.BytesIO(response.content), 'r') as arquivo_zip:
-            dataframes = [pd.read_csv(arquivo_zip.open(file), sep=';', encoding='ISO-8859-1', 
-                                      usecols=['CNPJ_FUNDO', 'VL_PATRIM_LIQ', 'VL_MERC_POS_FINAL', 
-                                               'DT_COMPTC', 'DENOM_SOCIAL', 'TP_APLIC', 'TP_ATIVO']) 
-                          for file in arquivo_zip.namelist()]
+            dataframes = []
+            for file in arquivo_zip.namelist():
+                try:
+                    df = pd.read_csv(arquivo_zip.open(file), sep=';', encoding='ISO-8859-1')
+                    
+                    # Verifica se as colunas desejadas estão presentes
+                    expected_columns = ['CNPJ_FUNDO', 'VL_PATRIM_LIQ', 'VL_MERC_POS_FINAL', 
+                                        'DT_COMPTC', 'DENOM_SOCIAL', 'TP_APLIC', 'TP_ATIVO']
+                    available_columns = [col for col in expected_columns if col in df.columns]
+                    
+                    # Filtra as colunas se todas as necessárias estiverem presentes
+                    if set(expected_columns).issubset(df.columns):
+                        df = df[expected_columns]
+                    else:
+                        df = df[available_columns]
+                    
+                    dataframes.append(df)
+                except Exception as e:
+                    st.warning(f"Erro ao ler o arquivo {file} no mês {mes:02}: {e}")
+            
             dados_mes = pd.concat(dataframes, ignore_index=True)
             dados_mes = dados_mes.rename(columns={
                 'CNPJ_FUNDO': 'CNPJ Fundo', 'VL_PATRIM_LIQ': 'Patrimônio Líquido',
