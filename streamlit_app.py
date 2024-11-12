@@ -13,8 +13,9 @@ st.write('Insira o CNPJ do fundo e selecione o ano para visualizar a composiçã
 cnpj_especifico = st.text_input("Digite o CNPJ do fundo", '09.136.668/0001-35')
 ano = st.selectbox("Selecione o ano", ['2024'])
 
-# Função para baixar e processar dados de um mês específico e já aplicar o filtro pelo CNPJ
-def processar_dados_mes_filtrado(ano, mes, cnpj_especifico):
+# Função para baixar e processar dados de um mês específico sem filtro de CNPJ
+@st.cache_data(show_spinner=False)
+def processar_dados_mes(ano, mes):
     url = f'https://dados.cvm.gov.br/dados/FI/DOC/CDA/DADOS/cda_fi_{ano}{mes:02}.zip'
     try:
         response = requests.get(url, timeout=10)
@@ -33,58 +34,65 @@ def processar_dados_mes_filtrado(ano, mes, cnpj_especifico):
                         'TP_ATIVO': 'Tipo Ativo',
                     })
                     
-                    # Filtrar pelo CNPJ especificado
-                    df_filtrado = df[df['CNPJ Fundo'] == cnpj_especifico]
-                    
                     # Transformar a data de competência para o nome do mês
-                    df_filtrado['Data Competência'] = pd.to_datetime(df_filtrado['Data Competência']).dt.strftime('%B')
-                    
-                    # Adicionar à lista somente se houver dados relevantes
-                    if not df_filtrado.empty:
-                        dataframes.append(df_filtrado)
+                    df['Data Competência'] = pd.to_datetime(df['Data Competência']).dt.strftime('%B')
+                    dataframes.append(df)
                 except Exception as e:
                     st.warning(f"Erro ao ler o arquivo {file} no mês {mes:02}: {e}")
             
-            # Concatenar os dados filtrados do mês
+            # Concatenar os dados do mês
             return pd.concat(dataframes, ignore_index=True) if dataframes else None
     except requests.exceptions.RequestException as e:
         st.error(f"Erro ao baixar os dados do mês {mes:02}: {e}")
         return None
 
-# Inicializar DataFrame para acumular dados agregados por mês
-dados_acumulados = pd.DataFrame()
-
-# Processamento incremental: carregar dados mês a mês e aplicar o filtro de CNPJ
-for mes in range(1, 13):
-    with st.spinner(f"Baixando e processando dados para {ano}-{mes:02}..."):
-        dados_mes = processar_dados_mes_filtrado(ano, mes, cnpj_especifico)
+# Função para carregar e cachear todos os dados do ano completo, sem filtro de CNPJ
+@st.cache_data(show_spinner=False)
+def carregar_dados_ano(ano):
+    todos_dados = []
+    for mes in range(1, 13):
+        dados_mes = processar_dados_mes(ano, mes)
         if dados_mes is not None:
-            # Agregar diretamente sobre o acumulado para evitar carregar muitos dados na memória
-            dados_acumulados = pd.concat([dados_acumulados, dados_mes], ignore_index=True)
-
-# Verificar e processar os dados se disponíveis
-if not dados_acumulados.empty:
-    # Agrupar dados para composição de todos os meses
-    df_por_mes = dados_acumulados.groupby(['Data Competência', 'Tipo Aplicação'])['Valor Mercado Posição Final'].sum().unstack().fillna(0)
-    df_por_mes_percentual = df_por_mes.divide(df_por_mes.sum(axis=1).replace(0, 1), axis=0) * 100
-    df_por_mes_percentual = df_por_mes_percentual.apply(lambda x: x.where(x >= 0.5, other=0))
-
-    # Ordenar colunas globalmente
-    global_totals = df_por_mes_percentual.sum(axis=0).sort_values(ascending=False).index
-    df_por_mes_percentual_sorted = df_por_mes_percentual[global_totals]
-
-    # Plot do gráfico com todos os meses
-    fig, ax = plt.subplots(figsize=(12, 6))
-    df_por_mes_percentual_sorted.plot(kind='bar', stacked=True, ax=ax)
-    ax.set_title(f'Composição do Fundo {cnpj_especifico} - {ano}')
-    ax.get_yaxis().set_visible(False)
-    ax.set_xlabel('')
+            todos_dados.append(dados_mes)
     
-    # Adicionar os percentuais nas barras
-    for c in ax.containers:
-        labels = [f'{v:.1f}%' if v >= 0.5 else '' for v in c.datavalues]
-        ax.bar_label(c, labels=labels, label_type='center', fontsize=10)
+    if todos_dados:
+        dados_ano = pd.concat(todos_dados, ignore_index=True)
+        return dados_ano
+    else:
+        st.warning("Nenhum dado foi encontrado para o ano selecionado.")
+        return pd.DataFrame()
+
+# Carregar todos os dados do ano e armazenar em cache
+dados_ano_total = carregar_dados_ano(ano)
+
+# Filtrar os dados pelo CNPJ especificado localmente, sem recarregar os dados do ano
+if not dados_ano_total.empty:
+    dados_filtro_cnpj = dados_ano_total[dados_ano_total['CNPJ Fundo'] == cnpj_especifico].copy()
     
-    st.pyplot(fig)
+    if not dados_filtro_cnpj.empty:
+        # Agrupar dados para composição de todos os meses
+        df_por_mes = dados_filtro_cnpj.groupby(['Data Competência', 'Tipo Aplicação'])['Valor Mercado Posição Final'].sum().unstack().fillna(0)
+        df_por_mes_percentual = df_por_mes.divide(df_por_mes.sum(axis=1).replace(0, 1), axis=0) * 100
+        df_por_mes_percentual = df_por_mes_percentual.apply(lambda x: x.where(x >= 0.5, other=0))
+
+        # Ordenar colunas globalmente
+        global_totals = df_por_mes_percentual.sum(axis=0).sort_values(ascending=False).index
+        df_por_mes_percentual_sorted = df_por_mes_percentual[global_totals]
+
+        # Plot do gráfico com todos os meses
+        fig, ax = plt.subplots(figsize=(12, 6))
+        df_por_mes_percentual_sorted.plot(kind='bar', stacked=True, ax=ax)
+        ax.set_title(f'Composição do Fundo {cnpj_especifico} - {ano}')
+        ax.get_yaxis().set_visible(False)
+        ax.set_xlabel('')
+        
+        # Adicionar os percentuais nas barras
+        for c in ax.containers:
+            labels = [f'{v:.1f}%' if v >= 0.5 else '' for v in c.datavalues]
+            ax.bar_label(c, labels=labels, label_type='center', fontsize=10)
+        
+        st.pyplot(fig)
+    else:
+        st.write("Nenhum dado encontrado para o CNPJ informado.")
 else:
-    st.write("Nenhum dado encontrado para o CNPJ informado ou houve um erro no processamento.")
+    st.write("Nenhum dado disponível para o ano selecionado.")
