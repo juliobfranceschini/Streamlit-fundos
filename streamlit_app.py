@@ -13,9 +13,9 @@ st.write('Insira o CNPJ do fundo e selecione o ano para visualizar a composiçã
 cnpj_especifico = st.text_input("Digite o CNPJ do fundo", '09.136.668/0001-35')
 ano = st.selectbox("Selecione o ano", ['2024'])
 
-# Função para baixar e processar dados brutos do mês (cache dos dados brutos)
+# Função para processar e baixar dados de um mês específico e já aplicar o filtro pelo CNPJ
 @st.cache_data(show_spinner=False)
-def baixar_dados_mes_bruto(ano, mes):
+def baixar_dados_mes_filtrado(ano, mes, cnpj_especifico):
     url = f'https://dados.cvm.gov.br/dados/FI/DOC/CDA/DADOS/cda_fi_{ano}{mes:02}.zip'
     try:
         response = requests.get(url, timeout=10)
@@ -25,68 +25,70 @@ def baixar_dados_mes_bruto(ano, mes):
             for file in arquivo_zip.namelist():
                 try:
                     df = pd.read_csv(arquivo_zip.open(file), sep=';', encoding='ISO-8859-1')
-                    dataframes.append(df)
+                    
+                    # Renomear colunas e selecionar apenas as relevantes
+                    df = df.rename(columns={
+                        'CNPJ_FUNDO': 'CNPJ Fundo', 'VL_PATRIM_LIQ': 'Patrimônio Líquido',
+                        'VL_MERC_POS_FINAL': 'Valor Mercado Posição Final', 'DT_COMPTC': 'Data Competência',
+                        'DENOM_SOCIAL': 'Denominação Social', 'TP_APLIC': 'Tipo Aplicação', 
+                        'TP_ATIVO': 'Tipo Ativo',
+                    })
+                    
+                    # Filtrar pelo CNPJ especificado
+                    df_filtrado = df[df['CNPJ Fundo'] == cnpj_especifico]
+                    
+                    # Adicionar à lista somente se houver dados relevantes
+                    if not df_filtrado.empty:
+                        # Transformar a data de competência para o nome do mês
+                        df_filtrado['Data Competência'] = pd.to_datetime(df_filtrado['Data Competência']).dt.strftime('%B')
+                        dataframes.append(df_filtrado)
                 except Exception as e:
                     st.warning(f"Erro ao ler o arquivo {file} no mês {mes:02}: {e}")
-            dados_mes = pd.concat(dataframes, ignore_index=True)
-            dados_mes = dados_mes.rename(columns={
-                'CNPJ_FUNDO': 'CNPJ Fundo', 'VL_PATRIM_LIQ': 'Patrimônio Líquido',
-                'VL_MERC_POS_FINAL': 'Valor Mercado Posição Final', 'DT_COMPTC': 'Data Competência',
-                'DENOM_SOCIAL': 'Denominação Social', 'TP_APLIC': 'Tipo Aplicação', 
-                'TP_ATIVO': 'Tipo Ativo',
-            })
-            return dados_mes
+            
+            # Concatenar apenas os dados filtrados
+            return pd.concat(dataframes, ignore_index=True) if dataframes else None
     except requests.exceptions.RequestException as e:
         st.error(f"Erro ao baixar os dados do mês {mes:02}: {e}")
         return None
 
-# Função para carregar e concatenar os dados brutos de todos os meses de um ano
-@st.cache_data(show_spinner=False)
-def carregar_dados_ano(ano):
-    todos_dados = []
-    for mes in range(1, 13):
-        dados_mes = baixar_dados_mes_bruto(ano, mes)
+# Baixar e filtrar dados para o ano selecionado de forma incremental, mês a mês
+dados_fundos_total = []
+for mes in range(1, 13):
+    with st.spinner(f"Baixando dados para {ano}-{mes:02}..."):
+        dados_mes = baixar_dados_mes_filtrado(ano, mes, cnpj_especifico)
         if dados_mes is not None:
-            todos_dados.append(dados_mes)
-    if todos_dados:
-        dados_ano = pd.concat(todos_dados, ignore_index=True)
-        dados_ano['Data Competência'] = pd.to_datetime(dados_ano['Data Competência']).dt.strftime('%B')
-        return dados_ano
-    else:
-        st.warning("Nenhum dado foi encontrado para o ano selecionado.")
-        return pd.DataFrame()
+            dados_fundos_total.append(dados_mes)
 
-# Carregar os dados brutos do ano selecionado uma vez
-dados_ano_total = carregar_dados_ano(ano)
-
-# Filtrar pelo CNPJ especificado sem recarregar dados
-if not dados_ano_total.empty:
-    dados_filtro_cnpj = dados_ano_total[dados_ano_total['CNPJ Fundo'] == cnpj_especifico].copy()
-    
-    if not dados_filtro_cnpj.empty:
-        # Agrupar dados para composição de todos os meses
-        df_por_mes = dados_filtro_cnpj.groupby(['Data Competência', 'Tipo Aplicação'])['Valor Mercado Posição Final'].sum().unstack().fillna(0)
-        df_por_mes_percentual = df_por_mes.divide(df_por_mes.sum(axis=1).replace(0, 1), axis=0) * 100
-        df_por_mes_percentual = df_por_mes_percentual.apply(lambda x: x.where(x >= 0.5, other=0))
-
-        # Ordenar colunas globalmente
-        global_totals = df_por_mes_percentual.sum(axis=0).sort_values(ascending=False).index
-        df_por_mes_percentual_sorted = df_por_mes_percentual[global_totals]
-
-        # Plot do gráfico com todos os meses
-        fig, ax = plt.subplots(figsize=(12, 6))
-        df_por_mes_percentual_sorted.plot(kind='bar', stacked=True, ax=ax)
-        ax.set_title(f'Composição do Fundo {cnpj_especifico} - {ano}')
-        ax.get_yaxis().set_visible(False)
-        ax.set_xlabel('')
-        
-        # Adicionar os percentuais nas barras
-        for c in ax.containers:
-            labels = [f'{v:.1f}%' if v >= 0.5 else '' for v in c.datavalues]
-            ax.bar_label(c, labels=labels, label_type='center', fontsize=10)
-        
-        st.pyplot(fig)
-    else:
-        st.write("Nenhum dado encontrado para o CNPJ informado.")
+# Concatenar os dados de todos os meses filtrados
+if dados_fundos_total:
+    dados_fundos_total = pd.concat(dados_fundos_total, ignore_index=True)
 else:
-    st.write("Nenhum dado disponível para o ano selecionado.")
+    st.warning("Nenhum dado foi encontrado para o CNPJ informado ou houve erro no download.")
+    dados_fundos_total = None
+
+# Verificar e processar os dados se disponíveis
+if dados_fundos_total is not None and not dados_fundos_total.empty:
+    # Agrupar dados para composição de todos os meses
+    df_por_mes = dados_fundos_total.groupby(['Data Competência', 'Tipo Aplicação'])['Valor Mercado Posição Final'].sum().unstack().fillna(0)
+    df_por_mes_percentual = df_por_mes.divide(df_por_mes.sum(axis=1).replace(0, 1), axis=0) * 100
+    df_por_mes_percentual = df_por_mes_percentual.apply(lambda x: x.where(x >= 0.5, other=0))
+
+    # Ordenar colunas globalmente
+    global_totals = df_por_mes_percentual.sum(axis=0).sort_values(ascending=False).index
+    df_por_mes_percentual_sorted = df_por_mes_percentual[global_totals]
+
+    # Plot do gráfico com todos os meses
+    fig, ax = plt.subplots(figsize=(12, 6))
+    df_por_mes_percentual_sorted.plot(kind='bar', stacked=True, ax=ax)
+    ax.set_title(f'Composição do Fundo {cnpj_especifico} - {ano}')
+    ax.get_yaxis().set_visible(False)
+    ax.set_xlabel('')
+    
+    # Adicionar os percentuais nas barras
+    for c in ax.containers:
+        labels = [f'{v:.1f}%' if v >= 0.5 else '' for v in c.datavalues]
+        ax.bar_label(c, labels=labels, label_type='center', fontsize=10)
+    
+    st.pyplot(fig)
+else:
+    st.write("Nenhum dado encontrado para o CNPJ informado ou houve um erro no processamento.")
