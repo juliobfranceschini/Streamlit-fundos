@@ -34,6 +34,10 @@ def processar_dados_mes_filtrado(ano, mes, cnpj_especifico):
                         'TP_ATIVO': 'Tipo Ativo',
                     })
                     
+                    # Mostrar CNPJs disponíveis para depuração
+                    if 'CNPJ Fundo' in df.columns:
+                        st.write(f"CNPJs disponíveis no mês {mes:02}: {df['CNPJ Fundo'].unique()[:5]} ...")
+
                     # Filtrar pelo CNPJ especificado
                     df_filtrado = df[df['CNPJ Fundo'] == cnpj_especifico]
                     
